@@ -7,6 +7,20 @@
 #include <sys/user.h>
 #include <cstdint>
 int main(int argc, char* argv[]) {
+    //setup for page num calculations
+    long page_size = sysconf(_SC_PAGESIZE);
+    //assume 4kb if sysconf fails
+    if (page_size <= 0) {
+        page_size = 4096;
+    }
+
+    unsigned int page_shift = 0;
+    //calculate the number of bits to shift by doubling unsigned long of 1 until it reaches the page size
+    while ((1UL << page_shift) < (unsigned long)(page_size)) {
+        ++page_shift;
+    }
+
+
     pid_t ch_pid = fork();
     if (ch_pid == 0) {
         // Tell parent to trace this process
@@ -59,7 +73,13 @@ int main(int argc, char* argv[]) {
 		perror("After GetRegs");
 	    	break;
 	    }
-            std::printf("Instruction addr: %llx\n", static_cast<unsigned long long>(regs.rip));
+
+	   //calculate the page number for the current instrucions address
+	   uint64_t mem_addr = regs.rip;
+	   uint64_t page_num = mem_addr >> page_shift;
+
+
+            std::printf("Instruction addr: %llx\tPage Num: %llx\n",(unsigned long long) mem_addr,(unsigned long long) page_num);
 	    //step to the next instruction after printing the memory address of the previous instruction
 	    errno = 0;
             if (ptrace((__ptrace_request)PTRACE_SINGLESTEP, ch_pid, nullptr, nullptr) == -1) {
