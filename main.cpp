@@ -4,68 +4,73 @@
 #include <sys/wait.h>
 #include <sys/errno.h>
 #include <linux/ptrace.h>
-
+#include <sys/user.h>
+#include <cstdint>
 int main(int argc, char* argv[]) {
     pid_t ch_pid = fork();
     if (ch_pid == 0) {
         // Tell parent to trace this process
-        ptrace(static_cast<__ptrace_request>(PTRACE_TRACEME), getpid(), nullptr, nullptr);
+        ptrace((__ptrace_request)(PTRACE_TRACEME), getpid(), nullptr, nullptr);
         raise(SIGSTOP); // stop myself so the parent can start tracing
-        char *args[] = {(char *) "ls", (char *) "-l", nullptr};
+        char *args[] = {(char *) "./short-loop",  nullptr};
         execvp(args[0], args);
     } else {
-        ptrace_syscall_info sc_info;
-        // Wait for the child to stop before starting to trace its system calls
-        wait(nullptr);
-        perror("After first wait in parent");
-        ptrace((__ptrace_request) PTRACE_SETOPTIONS, ch_pid, nullptr, PTRACE_O_TRACESYSGOOD);
-        perror("After PTRACE_SETOPTIONS");
-        // Start tracing at the (first) system call of the child process
+	//new struct to hold return value of assembly version
+        int status = 0;
 
-	//TODO
-        //modify to allow trace assembly instructions instead of syscalls
-        ptrace((__ptrace_request) PTRACE_SYSCALL, ch_pid, nullptr, nullptr);
-        perror("After PTRACE_SYSCALL");
+        // wait for the child's initial raise(SIGSTOP) after PTRACE_TRACEME
+        errno = 0;
+        if (wait(&status) == -1) {
+            perror("After first wait in parent");
+            return 1;
+        }
+        if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            return 0;
+        }
+
+        // Step once before the loop so the first wait() inside the loop
+        // captures a single-step stop at an executed instruction
+        errno = 0;
+        if (ptrace((__ptrace_request)(PTRACE_SINGLESTEP), ch_pid, nullptr, nullptr) == -1) {
+            perror("After initial PTRACE_SINGLESTEP");
+            return 1;
+        }
         while(true) {
-            pid_t who = wait(nullptr);
-            if (errno)
-                perror("After parent wait in loop");
-            if (who == -1 || errno) break;
-            // Get information about the current system call
+	    errno = 0;
+            pid_t who = wait(&status);
+            
+	    //exit loop when child is done executing instructions
+            if (who == -1){
+	      if(errno != ECHILD){
+		   perror("After parent wait in loop");
 
-	    //TODO
-	    //replace with assembly extraction instead of syscall
-            ptrace((__ptrace_request) PTRACE_GET_SYSCALL_INFO, ch_pid, sizeof(sc_info), &sc_info);
-            if (errno)
-                perror("After GET_SYSCALL_INFO");
+		}
+      	       break;
+	    }
 
-	    //TODO replace with code that handles same thing for assembly instead of syscall
 
-            switch(sc_info.op) {
-                case PTRACE_SYSCALL_INFO_ENTRY:
-                    // This point is reached when the child is about to start a system call
-                    std::printf("System call ID:%lld ", sc_info.entry.nr);
-                    break;
-                case PTRACE_SYSCALL_INFO_EXIT:
-                    // This point is reached when the child has completed the system call
-                    if (!sc_info.exit.is_error)
-                        std::printf("==> %llx\n", sc_info.exit.rval);
-                    else
-                        std::printf("==> ERROR\n");
-                    break;
-                case PTRACE_SYSCALL_INFO_NONE:
-                    std::printf("None of options???\n");
-                    break;
-                default:
-                    std::printf("Unknown action ?????\n");
+	    if(WIFEXITED(status) || WIFSIGNALED(status)){break;}
+
+            // Get information about the current assembly instruction
+	    struct user_regs_struct regs;
+    	    errno = 0;
+	    //TODO - MAYBE DONE
+            if( ptrace((__ptrace_request) PTRACE_GETREGS, ch_pid, nullptr, &regs) == -1){
+		perror("After GetRegs");
+	    	break;
+	    }
+            std::printf("Instruction addr: %llx\n", static_cast<unsigned long long>(regs.rip));
+	    //step to the next instruction after printing the memory address of the previous instruction
+	    errno = 0;
+            if (ptrace((__ptrace_request)PTRACE_SINGLESTEP, ch_pid, nullptr, nullptr) == -1) {
+                perror("After PTRACE_SINGLESTEP");
+                break;
             }
-
 	    //TODO
 
 	    //Modify to continue tracing assembly instructions instead
 
-            // Continue tracing to the next system call of the child process
-            ptrace((__ptrace_request) PTRACE_SYSCALL, ch_pid, nullptr, nullptr);
+           
         }
         std::cout << "From Parent" << std::endl;
     }
