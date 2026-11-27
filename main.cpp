@@ -65,10 +65,50 @@ int lfu(std::vector<table_entry> &page_table, uint64_t page_num){
 }
 
 //TODO
-int lru(std::vector<table_entry> &page_table, uint64_t page_num){}
+int lru(std::vector<table_entry> &page_table, uint64_t page_num, bool fault, int max_pages){
+	//kick out oldest slot, (i = 0)
+	
+	if(fault){
+	   //remove first entry in table (least recent) only if the table is full
+	   if(page_table.size() >= max_pages){page_table.erase(page_table.begin());}
+	   table_entry new_val;
+	   new_val.page_num = page_num;
+	   new_val.num_references = 1;
+	   new_val.used = true;
+	   //add new value after last entry and shift others back (most recent slot)
+	   page_table.push_back(new_val);
+	}
+
+
+	//move hit to most recent slot on a succesful memory access
+	else{
+	   for(int i = 0; i < page_table.size(); i++){
+		if(page_table[i].page_num == page_num){
+		   //clone the table entry
+		   table_entry new_val;
+ 		   new_val.page_num = page_num;
+		   new_val.num_references = page_table[i].num_references;
+		   new_val.used = page_table[i].used;
+
+		  //remove old entry
+		  page_table.erase(page_table.begin() + i);
+	          //add clone entry to most recently used slot
+		  page_table.push_back(new_val);
+	          break;
+		}
+
+	   }
+
+	}
+	return 1;
+
+
+
+
+}
 
 //TODO
-int clock(std::vector<table_entry> &page_table, uint64_t page_num){}
+int clock(std::vector<table_entry> &page_table, uint64_t page_num){return 1;}
 
 
 int main(int argc, char* argv[]) {
@@ -228,6 +268,7 @@ int main(int argc, char* argv[]) {
 		   //make sure it is still saying it is being used
 		   page_table[i].used = true;
 		   if(debug_mode){std::printf("Page is already in the page table!\n");}
+		   if(policy == "lru") {lru(page_table, page_num, false, max_page_allocations);}
 		   break;
 		}
 
@@ -240,6 +281,9 @@ int main(int argc, char* argv[]) {
 		//add the page to the page table
 		if(debug_mode){std::printf("Page fault and room in the table\n");}
 		//make new struct to hold the new page table entry
+
+		
+
 		table_entry new_val;
 		new_val.page_num = page_num;
 		new_val.num_references = 1;
@@ -259,6 +303,10 @@ int main(int argc, char* argv[]) {
 		}
 		else if(policy == "lfu"){
 		      return_val = lfu(page_table, page_num);
+		}
+		else if(policy == "lru"){
+		     return_val = lru(page_table, page_num, true, max_page_allocations);
+
 		}
 
 		page_faults += 1;
